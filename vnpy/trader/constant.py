@@ -90,8 +90,8 @@ class Exchange(Enum):
     DCE = "DCE"             # Dalian Commodity Exchange
     INE = "INE"             # Shanghai International Energy Exchange
     GFEX = "GFEX"           # Guangzhou Futures Exchange
-    SSE = "SSE"             # Shanghai Stock Exchange
-    SZSE = "SZSE"           # Shenzhen Stock Exchange
+    SSE = "SH"             # Shanghai Stock Exchange
+    SZSE = "SZ"           # Shenzhen Stock Exchange
     BSE = "BSE"             # Beijing Stock Exchange
     SHHK = "SHHK"           # Shanghai-HK Stock Connect
     SZHK = "SZHK"           # Shenzhen-HK Stock Connect

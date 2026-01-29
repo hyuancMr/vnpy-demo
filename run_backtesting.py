@@ -15,9 +15,9 @@ def run_backtest(vt_symbol: str):
     # 设置回测参数
     engine.set_parameters(
         vt_symbol=vt_symbol,
-        interval=Interval.MINUTE,
-        start=datetime(2023, 1, 1),
-        end=datetime(2023, 12, 31),
+        interval=Interval.DAILY,
+        start=datetime(2025, 1, 1),
+        end=datetime(2026, 1, 29),
         rate=0.0003,      # A股佣金（万三）
         slippage=0.01,    # 假设1分钱滑点
         size=100,         # 1手=100股
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     # 1. 模拟一个需要回测的股票列表 (实际应用中可以通过 tushare 获取)
     # 示例包含：主板 60/00, 剔除 300/688
     all_symbols = [
-        "600036.SSE", "600519.SSE", "000001.SZSE", 
+        "600036.SSE", 
         "300059.SZSE", "688001.SSE" # 后面两个应该被策略内的过滤逻辑拦截或在此处手动排除
     ]
     
@@ -66,8 +66,8 @@ if __name__ == "__main__":
                 results.append({
                     "代码": vt_symbol,
                     "总收益率": stats["total_return"],
-                    "胜率": stats["winning_rate"],
-                    "盈亏比": stats["profit_loss_ratio"],
+                    # "胜率": stats["winning_rate"],
+                    # "盈亏比": stats["profit_loss_ratio"],
                     "成交笔数": stats["total_trade_count"]
                 })
         except Exception as e:

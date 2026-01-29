@@ -1052,7 +1052,47 @@ class BacktestingEngine:
         """
         return list(self.daily_results.values())
 
+from collections import defaultdict
 
+class MultiSymbolBacktestingEngine(BacktestingEngine):
+    """扩展原引擎以支持多股横截面回测"""
+
+    def load_market_data(self, vt_symbols: list):
+        """一次性加载并对齐所有股票数据"""
+        self.market_history_data = defaultdict(dict)
+        
+        for vt_symbol in vt_symbols:
+            self.output(f"加载 {vt_symbol} 数据...")
+            # 调用原有的加载逻辑
+            symbol, exchange = vt_symbol.split(".")
+            data = load_bar_data(symbol, Exchange(exchange), self.interval, self.start, self.end)
+            
+            for bar in data:
+                self.market_history_data[bar.datetime][vt_symbol] = bar
+
+    def run_market_backtesting(self):
+        """执行全市场时间线回测"""
+        self.strategy.on_init()
+        self.strategy.on_start()
+        
+        # 按时间正序回放数据
+        sorted_dts = sorted(self.market_history_data.keys())
+        
+        for dt in sorted_dts:
+            self.datetime = dt
+            bars_at_dt = self.market_history_data[dt]
+            
+            # 撮合限价单
+            self.cross_limit_order() 
+            
+            # 调用策略的全市场处理接口
+            self.strategy.on_market_bars(bars_at_dt)
+            
+            # 更新每日收盘价用于计算统计指标
+            for vt_symbol, bar in bars_at_dt.items():
+                if vt_symbol == self.vt_symbol: # 兼容原有每日结算逻辑
+                    self.update_daily_close(bar.close_price)
+                    
 class DailyResult:
     """"""
 
@@ -1265,3 +1305,25 @@ def get_target_value(result: list | tuple) -> float:
     Get target value for sorting optimization results.
     """
     return cast(float, result[1])
+
+def run_market_screening_backtesting(self, target_symbols: list):
+    """
+    针对全市场股票列表进行回测
+    """
+    # 1. 预加载所有股票数据到内存 (需注意内存占用)
+    all_data = {}
+    for symbol in target_symbols:
+        self.output(f"预加载 {symbol} 数据...")
+        all_data[symbol] = load_bar_data(symbol, self.exchange, self.interval, self.start, self.end)
+    
+    # 2. 按时间线纵向推进
+    # 获取所有数据的并集时间戳
+    all_timestamps = sorted(list(set(bar.datetime for bars in all_data.values() for bar in bars)))
+    
+    for dt in all_timestamps:
+        self.datetime = dt
+        # 提取当前时刻全市场的 Bar 数据
+        current_market_snapshot = {s: d.get(dt) for s, d in all_data.items() if dt in d}
+        
+        # 触发策略的筛选逻辑
+        self.strategy.on_market_bar(current_market_snapshot)

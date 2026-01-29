@@ -147,26 +147,55 @@ class TushareDatafeed(BaseDatafeed):
 
         return True
 
-    def load_bar_data(self, symbol, exchange, interval, start, end):
-        req: HistoryRequest = HistoryRequest(
-            symbol=symbol,
-            exchange=exchange,
-            start=start,
-            end=end,
-            interval=interval
-        )
-        return self.query_bar_history(req, print)
+    def get_all_stocks(self, output: Callable = print) -> list[dict]:
+        """
+        获取所有 A 股列表 (剔除创业板和科创板)
+        返回格式: [{'symbol': '600036', 'exchange': Exchange.SSE, 'name': '招商银行'}, ...]
+        """
+        # 确保接口已初始化
+        if not self.inited:
+            self.init(output)
+            
+        try:
+            # 调用 tushare 基础查询接口
+            # list_status='L' 表示上市中的股票
+            df: DataFrame = self.pro.stock_basic(
+                exchange='', 
+                list_status='L', 
+                fields='ts_code,symbol,name,market,list_date'
+            )
+            
+            if df.empty:
+                output("未获取到任何股票数据")
+                return df
 
-    def load_tick_data(self, symbol, exchange, start, end):
-        req: HistoryRequest = HistoryRequest(
-            symbol=symbol,
-            exchange=exchange,
-            start=start,
-            end=end,
-            interval="tick"
-        )
-        return self.query_bar_history(req, print)
+            # 过滤逻辑：
+            # 1. 剔除创业板和科创板（通过代码前缀）
+            # 2. 剔除北交所
+            # 使用 str.startswith 过滤多个前缀
+            mask = df['symbol'].str.startswith(('300', '301', '688', '8'))
+            main_board_df = df[~mask].copy()
+            
+            # 增加一列 vnpy 标准的交易所格式，方便后续回测使用
+            def convert_exchange(ts_code: str):
+                if ts_code.endswith(".SH"):
+                    return Exchange.SSE
+                elif ts_code.endswith(".SZ"):
+                    return Exchange.SZSE
+                return None
 
+            main_board_df['vnpy_exchange'] = main_board_df['ts_code'].apply(convert_exchange)
+            
+            # 剔除无法识别交易所的标的（如有）
+            main_board_df.dropna(subset=['vnpy_exchange'], inplace=True)
+            
+            output(f"成功获取主板列表，共计 {len(main_board_df)} 只股票")
+            return main_board_df
+            
+        except Exception as e:
+            output(f"获取股票列表失败：{e}")
+            return pd.DataFrame()
+        
     def query_bar_history(self, req: HistoryRequest, output: Callable = print) -> list[BarData] | None:
         """查询k线数据"""
         if not self.inited:

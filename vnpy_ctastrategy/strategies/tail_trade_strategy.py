@@ -1,79 +1,65 @@
-from vnpy_ctastrategy import (
-    CtaTemplate,
-    StopOrder,
-    TickData,
-    BarData,
-    TradeData,
-    OrderData,
-    BarGenerator,
-    ArrayManager,
-)
-from datetime import time
+from vnpy_ctastrategy import CtaTemplate
+from vnpy.trader.constant import Direction, Offset, Interval
+from vnpy.trader.object import BarData, TickData, OrderData, TradeData
 
 class TailTradeStrategy(CtaTemplate):
-    """
-    A股尾盘选股策略
-    逻辑：14:50 判断当前价格是否高于均线且放量，若是则买入。
-    次日 09:35 自动平仓。
-    """
-    author = "Coding Assistant"
-
-    # 参数定义
-    fast_window = 10
-    slow_window = 20
-    fixed_size = 100
-
-    # 变量定义
-    fast_ma = 0.0
-    slow_ma = 0.0
-
-    def __init__(self, cta_engine, strategy_name, vt_symbol, setting):
-        super().__init__(cta_engine, strategy_name, vt_symbol, setting)
+    """全市场尾盘筛选策略"""
+    
+    # 策略参数
+    capital_per_stock = 20000  # 每只股票分配资金
+    stock_count = 5            # 筛选数量
+    
+    def __init__(self, cta_engine, strategy_name, vt_symbols, setting):
+        super().__init__(cta_engine, strategy_name, vt_symbols, setting)
+        self.active_stocks = []  # 当前持仓列表
         
-        self.bg = BarGenerator(self.on_bar)
-        self.am = ArrayManager()
-
     def on_init(self):
-        """策略初始化"""
         self.write_log("策略初始化")
-        self.load_bar(10)
 
     def on_start(self):
-        """策略启动"""
         self.write_log("策略启动")
 
-    def on_stop(self):
-        """策略停止"""
-        self.write_log("策略停止")
+    def on_market_bars(self, bars: dict[str, BarData]):
+        """
+        核心调用逻辑：由引擎每分钟调用一次，传入当前分钟全市场的Bar
+        """
+        dt = list(bars.values())[0].datetime
+        
+        # 1. 早上 09:31 集合竞价后立即卖出昨日持仓
+        if dt.hour == 9 and dt.minute == 31:
+            self.sell_all_holdings(bars)
+            
+        # 2. 下午 14:55 执行筛选逻辑
+        if dt.hour == 14 and dt.minute == 55:
+            self.screen_and_buy(bars)
 
-    def on_tick(self, tick: TickData):
-        """Tick更新，用于BarGenerator合成"""
-        self.bg.update_tick(tick)
+    def screen_and_buy(self, bars: dict[str, BarData]):
+        scores = []
+        for vt_symbol, bar in bars.items():
+            # 过滤逻辑：排除涨跌停（A股涨停通常无法买入）
+            if bar.close_price >= bar.open_price * 1.098: 
+                continue
+            
+            # 高开因子计算：(尾盘拉升幅度 * 成交量放大倍数)
+            # 这里的逻辑是寻找尾盘有资金异常流入且维持强势的标的
+            change = (bar.close_price - bar.open_price) / bar.open_price
+            score = change * bar.volume
+            scores.append((vt_symbol, score))
+        
+        # 排序并选取前5名
+        selected = sorted(scores, key=lambda x: x[1], reverse=True)[:self.stock_count]
+        
+        for vt_symbol, score in selected:
+            buy_price = bars[vt_symbol].close_price
+            volume = int(self.capital_per_stock / buy_price / 100) * 100
+            if volume > 0:
+                self.buy(vt_symbol, buy_price, volume)
+                self.active_stocks.append(vt_symbol)
 
-    # 在策略类中添加代码过滤逻辑
-    def on_bar(self, bar: BarData):
-        # 过滤逻辑：剔除 300 和 688 开头的股票
-        symbol_code = bar.symbol
-        if symbol_code.startswith("300") or symbol_code.startswith("688"):
-            return
-
-        am = self.am
-        am.update_bar(bar)
-        if not am.inited:
-            return
-
-        # 技术逻辑：价格 > 5日均线 且 14:50 成交量 > 过去5周期平均成交量的1.5倍
-        avg_volume = am.volume[:-1].mean() # 获取历史平均成交量
-        current_time = bar.datetime.time()
-
-        if time(14, 50) <= current_time <= time(14, 57):
-            if self.pos == 0:
-                # 这里的 1.5 倍是放量系数
-                if bar.close_price > am.sma(5) and bar.volume > avg_volume * 1.5:
-                    self.buy(bar.close_price + 0.02, self.fixed_size)
-
-    def on_order(self, order: OrderData):
-        pass
-
-    def on_trade(self, trade: TradeData):
-        self.put_event()
+    def sell_all_holdings(self, bars: dict[str, BarData]):
+        """次日清仓逻辑"""
+        for vt_symbol in list(self.active_stocks):
+            if vt_symbol in bars:
+                # 使用当前价卖出，由于是回测，cross_limit_order 会处理成交
+                self.sell(vt_symbol, bars[vt_symbol].close_price, self.pos) 
+                self.active_stocks.remove(vt_symbol)
